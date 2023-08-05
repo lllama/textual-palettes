@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import asyncio
 from importlib_metadata import version
+import json
 from pathlib import Path
-from dataclasses import dataclass, fields
+from dataclasses import dataclass, fields, asdict
 from random import choice
 
 import httpx
@@ -258,6 +259,10 @@ class Message(Static):
     pass
 
 
+class Description(Static):
+    pass
+
+
 class Version(Static):
     def render(self) -> RenderableType:
         return f"[b]v{version('textual')}"
@@ -359,10 +364,27 @@ class Palette(Container):
         super().__init__()
         self.design = design
 
+    def watch_palette(self, new_value: PaletteInfo):
+        log(f"New palette: {new_value}")
+        if not new_value:
+            return
+        self.update_palette(new_value)
+
+    def update_palette(self, new_value):
+        try:
+            title = self.query_one(SectionTitle)
+            title.update(new_value.title)
+            title.styles.color = title.styles.background.get_contrast_text()
+
+            description = self.query_one(Description)
+            description.update(new_value.description)
+            description.styles.color = description.styles.background.get_contrast_text()
+        except NoMatches:
+            pass
+
     def watch_design(self, new_value):
         if not new_value:
             return
-        log(new_value)
         colours = new_value["dark"].generate()
         for key in self.colour_vars:
             try:
@@ -373,7 +395,10 @@ class Palette(Container):
                 pass
 
     def compose(self) -> ComposeResult:
-        yield SubTitle(self.palette.title)
+        # yield SubTitle("ASDASD")
+        yield SectionTitle(self.palette.title)
+        yield Description(self.palette.description)
+
         colours = self.design["dark"].generate()
         for key in self.colour_vars:
             color = Static(key, id=key)
@@ -402,6 +427,10 @@ class DemoApp(App):
         self.query_one(TextLog).write(renderable)
 
     async def on_load(self, event):
+        self.palettes = []
+        self.page = 0
+        self.palette_index = 0
+
         self.colour_vars = [
             "primary",
             "secondary",
@@ -414,21 +443,29 @@ class DemoApp(App):
             "error",
             "accent",
         ]
-        self.page = 0
-        self.palettes = []
-        self.palette_index = 0
-        self.client = httpx.AsyncClient()
-        response = await self.client.get(
-            PALETTES_URL.format(MAX_COLOURS=MAX_COLOURS, PAGE=self.page)
-        )
-        self.page += 1
-        self.palettes.extend(
-            PaletteInfo.from_json(palette) for palette in response.json()["palettes"]
-        )
+
+        cache = Path("palette_cache.json")
+        if cache.exists():
+            with cache.open() as f:
+                self.palettes = [PaletteInfo(**palette) for palette in json.load(f)]
+            self.page = len(self.palettes) % 10  # Ten palettes per page
+            self.page += 1  # Move to the next page
+
+        # self.client = httpx.AsyncClient()
+        # response = await self.client.get(
+        #     PALETTES_URL.format(MAX_COLOURS=MAX_COLOURS, PAGE=self.page)
+        # )
+        # self.page += 1
+        # self.palettes.extend(
+        #     PaletteInfo.from_json(palette) for palette in response.json()["palettes"]
+        # )
+
+        # with cache.open(mode="w") as f:
+        #     json.dump([asdict(palette) for palette in self.palettes], f)
 
         self.theme = self.design
 
-        self.set_timer(5, self.get_palettes)
+        # self.set_timer(5, self.get_palettes)
 
     async def get_palettes(self):
         try:
@@ -452,16 +489,14 @@ class DemoApp(App):
             TextLog(classes="-hidden", wrap=False, highlight=True, markup=True),
             Body(
                 QuickAccess(
-                    LocationLink("TOP", ".location-top"),
+                    LocationLink("Palette", ".location-top"),
                     # LocationLink("Palettes", ".location-palettes"),
                     LocationLink("Widgets", ".location-widgets"),
                     LocationLink("Rich content", ".location-rich"),
                     LocationLink("CSS", ".location-css"),
                 ),
                 AboveFold(
-                    SectionTitle("Palettes"),
                     Palette(self.design),
-                    TextContent(Markdown(WIDGETS_MD)),
                     classes="location-palettes location-top",
                 ),
                 Column(
@@ -517,54 +552,41 @@ class DemoApp(App):
 
         webbrowser.open(link)
 
-    def action_next_palette(self) -> None:
-        self.palette_index += 1
-        self.palette_index = self.palette_index % len(self.palettes)
+    def set_palette(self, animate=True):
+        palette = self.palettes[self.palette_index]
         new_colours = dict(
             zip(
                 self.colour_vars,
-                [f"#{color}" for color in self.palettes[self.palette_index].colors],
+                [f"#{color}" for color in palette.colors],
             )
         )
         self.design = {
             "dark": ColorSystem(**new_colours, dark=True),
             "light": ColorSystem(**new_colours, dark=False),
         }
-        self.refresh_css()
+        self.refresh_css(animate=animate)
         self.query_one(Palette).design = self.design
+        self.query_one(Palette).palette = palette
+
+    def action_next_palette(self) -> None:
+        self.palette_index += 1
+        self.palette_index = self.palette_index % len(self.palettes)
+
+        self.set_palette()
 
     def action_previous_palette(self) -> None:
         self.palette_index -= 1
         self.palette_index = self.palette_index % len(self.palettes)
-        new_colours = dict(
-            zip(
-                self.colour_vars,
-                [f"#{color}" for color in self.palettes[self.palette_index].colors],
-            )
-        )
-        self.design = {
-            "dark": ColorSystem(**new_colours, dark=True),
-            "light": ColorSystem(**new_colours, dark=False),
-        }
-        self.refresh_css()
-        self.query_one(Palette).design = self.design
+
+        self.set_palette()
 
     def action_cycle_palette(self) -> None:
         colours = self.palettes[self.palette_index].colors
         colours = colours[1:] + [colours[0]]
         self.palettes[self.palette_index].colors = colours
-        new_colours = dict(
-            zip(
-                self.colour_vars,
-                [f"#{color}" for color in colours],
-            )
-        )
-        self.design = {
-            "dark": ColorSystem(**new_colours, dark=True),
-            "light": ColorSystem(**new_colours, dark=False),
-        }
-        self.refresh_css(animate=False)
-        self.query_one(Palette).design = self.design
+
+        self.set_palette(animate=False)
+        self.query_one(Palette).update_palette(self.palettes[self.palette_index])
 
     def action_toggle_sidebar(self) -> None:
         sidebar = self.query_one(Sidebar)

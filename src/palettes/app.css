@@ -83,6 +83,7 @@ AboveFold {
     align: center middle;
 }
 
+
 Welcome {
     background: $boost;
     height: auto;
@@ -265,7 +266,7 @@ Version {
 
 Palette {
     layout: grid;
-    grid-size: 7 3
+    grid-size: 7 4
 }
 
 Palette>Static {
@@ -275,6 +276,20 @@ Palette>Static {
 
 }
 
-Palette>SubTitle {
+Palette>SectionTitle {
     column-span: 7;
+    padding: 1;
+    margin: 0;
+}
+
+Description {
+    column-span: 7;
+    background: $boost;
+    height: auto;
+    max-width: 100;
+    min-width: 40;
+    border: wide $primary;
+    padding: 1;
+    margin: 1;
+    box-sizing: border-box;
 }
